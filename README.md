@@ -26,7 +26,7 @@ This repository contains an n8n workflow, MySQL schema, seed data, and reviewer 
 
 ## Supported Telegram Inputs
 
-The bot supports both the inline menu flow and simple free-form update commands.
+The bot supports both the inline menu flow and AI-parsed natural-language update commands.
 
 Menu flow:
 
@@ -34,10 +34,12 @@ Menu flow:
 2. Choose `Update Prompt`, `Update Welcome Message`, or `Update Knowledge Base`.
 3. Send the new text when the bot asks for it.
 
-Free-form prompt example:
+AI-parsed prompt example:
 
 ```text
 update my agent to answer Hello world
 ```
 
 If the user has one linked agent, the command is applied to that agent. If the user has multiple linked agents and no selected agent, the bot asks the user to choose an agent first. The same MySQL ownership check still runs before any ElevenLabs API call.
+
+Natural-language messages are classified with OpenAI `gpt-5.4-nano` through the Responses API using a strict JSON schema. Configure `OPENAI_API_KEY` in the n8n environment before activating the workflow.

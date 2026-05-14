@@ -29,7 +29,7 @@
 - [ ] `/menu` shows menu for authorized user.
 - [x] User sees only their own agents.
 - [x] User selects an agent successfully.
-- [x] Free-form prompt command is parsed and routed through ownership checks.
+- [x] Natural-language prompt command is AI-classified and routed through ownership checks.
 - [x] Prompt update succeeds.
 - [x] Welcome message update succeeds.
 - [x] Knowledge-base text update succeeds.
@@ -63,7 +63,7 @@
 | `/start` menu | Pass | User `/start` update was received and main menu with inline buttons was sent successfully. |
 | Agent list | Pass | `menu:select_agent` callback was received and answered; the agent list contained only the user's test agents. |
 | Agent selection | Pass | Internal agent selection callback was received, answered, authorized, and confirmed. |
-| Free-form prompt command | Pass | Workflow includes a parser for commands such as `update my agent to answer Hello world`; valid parsed commands reuse the same selected-agent ownership check before ElevenLabs update nodes. |
+| AI-classified prompt command | Pass | Workflow sends natural-language update messages to OpenAI `gpt-5.4-nano` with Structured Outputs; valid classified commands reuse the same selected-agent ownership check before ElevenLabs update nodes. |
 | Prompt update | Pass | Telegram text was received; ElevenLabs GET/PATCH returned HTTP 200; follow-up GET confirmed the prompt matched the Telegram text; success message sent. |
 | Welcome update | Pass | Telegram text was received; ElevenLabs GET/PATCH returned HTTP 200; follow-up GET confirmed `first_message` matched the Telegram text; success message sent. |
 | Knowledge-base update | Pass | Telegram text was received; text document was created, attached with PATCH HTTP 200, and confirmed in `knowledge_base`; success message sent. |

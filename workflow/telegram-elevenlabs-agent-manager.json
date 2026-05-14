@@ -488,10 +488,10 @@
         -120
       ],
       "parameters": {
-        "jsCode": "const text = $json.message_text;\nconst data = $json.callback_data;\nconst pendingAction = $json.session?.pending_action;\n\nconst isFreeformCommand = typeof text === 'string' && !text.startsWith('/') && (\n  /^(?:update|change|set)\\s+(?:my\\s+)?(?:agent\\s+)?(?:prompt\\s+)?(?:to\\s+)?(?:answer|say|reply)\\s+.+$/i.test(text) ||\n  /^(?:update|change|set)\\s+(?:my\\s+)?(?:agent\\s+)?prompt\\s+(?:to|as)\\s+.+$/i.test(text) ||\n  /^(?:update|change|set)\\s+(?:my\\s+)?(?:agent\\s+)?(?:welcome(?:\\s+message)?|first\\s+message)\\s+(?:to|as)\\s+.+$/i.test(text) ||\n  /^(?:add|update|set)\\s+(?:my\\s+)?(?:agent\\s+)?(?:knowledge(?:\\s*base)?|content)\\s+(?:to|as|with)\\s+.+$/i.test(text)\n);\n\nlet route = 'main_menu';\nif (text === '/start') route = 'main_menu';\nelse if (text === '/menu') route = 'main_menu';\nelse if (text === '/cancel' || data === 'action:cancel') route = 'cancel';\nelse if (data === 'menu:select_agent') route = 'agent_list';\nelse if (typeof data === 'string' && data.startsWith('agent:select:')) route = 'select_agent';\nelse if (typeof data === 'string' && data.startsWith('action:')) route = 'start_pending_action';\nelse if ($json.has_unsupported_payload) route = 'unsupported_payload';\nelse if (text && !pendingAction && isFreeformCommand) route = 'freeform_command';\nelse if (text && pendingAction) route = 'complete_pending_action';\n\nreturn [{ json: { ...$json, route }, pairedItem: 0 }];"
+        "jsCode": "const text = $json.message_text;\nconst data = $json.callback_data;\nconst pendingAction = $json.session?.pending_action;\n\nlet route = 'main_menu';\nif (text === '/start') route = 'main_menu';\nelse if (text === '/menu') route = 'main_menu';\nelse if (text === '/cancel' || data === 'action:cancel') route = 'cancel';\nelse if (data === 'menu:select_agent') route = 'agent_list';\nelse if (typeof data === 'string' && data.startsWith('agent:select:')) route = 'select_agent';\nelse if (typeof data === 'string' && data.startsWith('action:')) route = 'start_pending_action';\nelse if ($json.has_unsupported_payload) route = 'unsupported_payload';\nelse if (text && pendingAction) route = 'complete_pending_action';\nelse if (text && typeof text === 'string' && !text.startsWith('/')) route = 'ai_intent_command';\n\nreturn [{ json: { ...$json, route }, pairedItem: 0 }];"
       },
       "notesInFlow": true,
-      "notes": "Routes message_text == /start, /menu, /cancel; callback_data menu/action/agent; unsupported payloads; free-form update commands; pending text; fallback main menu."
+      "notes": "Routes commands/callbacks/pending text first. Other natural-language text is sent to AI intent classification."
     },
     {
       "id": "route-branch",
@@ -529,7 +529,7 @@
               "outputKey": "complete_pending_action"
             },
             {
-              "outputKey": "freeform_command"
+              "outputKey": "ai_intent_command"
             }
           ]
         }
@@ -961,7 +961,7 @@
         500
       ],
       "parameters": {
-        "jsCode": "const context = $('Build Workflow Context').first().json;\nlet validation = {};\ntry {\n  validation = $('Validate Pending Text').first().json;\n} catch (error) {}\nlet freeform = {};\ntry {\n  freeform = $('Parse Freeform Command').first().json;\n} catch (error) {}\n\nconst requestedAction = freeform.requested_action || $json.requested_action || (() => {\n  try {\n    return $('Parse Action Callback').first().json.requested_action;\n  } catch (error) {\n    return null;\n  }\n})();\n\nconst pendingAction = freeform.pending_action || validation.pending_action || context.session?.pending_action || null;\nconst auth_route = requestedAction ? 'store_pending_action' : 'complete_pending_action';\n\nreturn [{\n  json: {\n    ...context,\n    ...validation,\n    ...freeform,\n    requested_action: requestedAction,\n    pending_action: pendingAction,\n    auth_route,\n    authorized_agent_id: $json.id,\n    elevenlabs_agent_id: $json.elevenlabs_agent_id,\n    agent_name: $json.agent_name\n  },\n  pairedItem: 0\n}];"
+        "jsCode": "const context = $('Build Workflow Context').first().json;\nlet validation = {};\ntry {\n  validation = $('Validate Pending Text').first().json;\n} catch (error) {}\nlet aiIntent = {};\ntry {\n  aiIntent = $('Parse AI Intent').first().json;\n} catch (error) {}\n\nconst requestedAction = aiIntent.requested_action || $json.requested_action || (() => {\n  try {\n    return $('Parse Action Callback').first().json.requested_action;\n  } catch (error) {\n    return null;\n  }\n})();\n\nconst pendingAction = aiIntent.pending_action || validation.pending_action || context.session?.pending_action || null;\nconst auth_route = requestedAction ? 'store_pending_action' : 'complete_pending_action';\n\nreturn [{\n  json: {\n    ...context,\n    ...validation,\n    ...aiIntent,\n    requested_action: requestedAction,\n    pending_action: pendingAction,\n    auth_route,\n    authorized_agent_id: $json.id,\n    elevenlabs_agent_id: $json.elevenlabs_agent_id,\n    agent_name: $json.agent_name\n  },\n  pairedItem: 0\n}];"
       },
       "notesInFlow": true,
       "notes": "Rebuilds the workflow context after the MySQL authorization row and chooses whether to store a new pending action or complete pending text."
@@ -2109,32 +2109,32 @@
       }
     },
     {
-      "id": "parse-freeform-command",
-      "name": "Parse Freeform Command",
+      "id": "parse-ai-intent",
+      "name": "Parse AI Intent",
       "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1760,
-        820
-      ],
-      "parameters": {
-        "jsCode": "// Supported example: \"update my agent to answer Hello world\"\nconst text = ($json.message_text || '').trim();\nconst session = { ...($json.session || {}) };\nconst agents = $json.agents || [];\n\nconst patterns = [\n  {\n    action: 'update_welcome_message',\n    regex: /^(?:update|change|set)\\s+(?:my\\s+)?(?:agent\\s+)?(?:welcome(?:\\s+message)?|first\\s+message)\\s+(?:to|as)\\s+([\\s\\S]+)$/i\n  },\n  {\n    action: 'update_knowledge_text',\n    regex: /^(?:add|update|set)\\s+(?:my\\s+)?(?:agent\\s+)?(?:knowledge(?:\\s*base)?|content)\\s+(?:to|as|with)\\s+([\\s\\S]+)$/i\n  },\n  {\n    action: 'update_prompt',\n    regex: /^(?:update|change|set)\\s+(?:my\\s+)?(?:agent\\s+)?prompt\\s+(?:to|as)\\s+([\\s\\S]+)$/i\n  },\n  {\n    action: 'update_prompt',\n    regex: /^(?:update|change|set)\\s+(?:my\\s+)?(?:agent\\s+)?(?:prompt\\s+)?(?:to\\s+)?(?:answer|say|reply)\\s+([\\s\\S]+)$/i\n  }\n];\n\nlet pending_action = null;\nlet update_text = null;\nfor (const pattern of patterns) {\n  const match = text.match(pattern.regex);\n  if (match) {\n    pending_action = pattern.action;\n    update_text = (match[1] || '').trim();\n    break;\n  }\n}\n\nconst limits = {\n  update_prompt: 4000,\n  update_welcome_message: 500,\n  update_knowledge_text: 2000\n};\nconst labels = {\n  update_prompt: 'Prompt',\n  update_welcome_message: 'Welcome message',\n  update_knowledge_text: 'Knowledge-base text'\n};\n\nlet validation_error = null;\nif (!pending_action) {\n  validation_error = 'I could not understand that update command. Use the menu or write a command like: update my agent to answer Hello world';\n} else if (!update_text) {\n  validation_error = 'Send non-empty text for this update.';\n} else if (pending_action === 'update_knowledge_text' && /^https?:\\/\\//i.test(update_text)) {\n  validation_error = 'URL ingestion is not supported. Send plain text instead.';\n} else if (update_text.length > limits[pending_action]) {\n  validation_error = labels[pending_action] + ' must be ' + limits[pending_action].toLocaleString('en-US') + ' characters or fewer.';\n}\n\nif (!session.selected_voice_agent_id && agents.length === 1) {\n  session.selected_voice_agent_id = agents[0].id;\n}\n\nconst needs_agent_selection = !validation_error && !session.selected_voice_agent_id;\nconst freeform_route = validation_error\n  ? 'validation_error'\n  : needs_agent_selection\n    ? 'agent_list'\n    : 'complete_pending_action';\n\nreturn [{\n  json: {\n    ...$json,\n    session,\n    requested_action: null,\n    pending_action,\n    update_text,\n    validation_error,\n    is_valid_update_text: validation_error === null,\n    needs_agent_selection,\n    freeform_route\n  },\n  pairedItem: 0\n}];"
-      },
-      "notesInFlow": true,
-      "notes": "Parses simple natural-language update commands such as: update my agent to answer Hello world."
-    },
-    {
-      "id": "freeform-command-branch",
-      "name": "Freeform Command Branch",
-      "type": "n8n-nodes-base.switch",
       "typeVersion": 2,
       "position": [
         1980,
         820
       ],
       "parameters": {
+        "jsCode": "const context = $('Build Workflow Context').first().json;\nconst session = { ...(context.session || {}) };\nconst agents = context.agents || [];\nconst response = $json.body || $json;\nconst statusCode = Number($json.statusCode || response.statusCode || 200);\n\nconst extractText = (payload) => {\n  if (typeof payload?.output_text === 'string') return payload.output_text;\n  const chunks = [];\n  for (const item of payload?.output || []) {\n    for (const content of item.content || []) {\n      if (typeof content.text === 'string') chunks.push(content.text);\n    }\n  }\n  return chunks.join('\\n').trim();\n};\n\nlet ai = null;\nlet validation_error = null;\nif (statusCode >= 400 || response.error) {\n  validation_error = 'AI intent parsing failed. Please use the menu or try again.';\n} else {\n  try {\n    ai = JSON.parse(extractText(response));\n  } catch (error) {\n    validation_error = 'AI intent parsing failed. Please use the menu or try again.';\n  }\n}\n\nconst allowedActions = new Set(['update_prompt', 'update_welcome_message', 'update_knowledge_text']);\nlet pending_action = allowedActions.has(ai?.action) ? ai.action : null;\nlet update_text = typeof ai?.update_text === 'string' ? ai.update_text.trim() : '';\nif ((update_text[0] === '\"' || update_text[0] === \"'\") && update_text.endsWith(update_text[0]) && update_text.length >= 2) {\n  update_text = update_text.slice(1, -1).trim();\n}\n\nconst limits = {\n  update_prompt: 4000,\n  update_welcome_message: 500,\n  update_knowledge_text: 2000\n};\nconst labels = {\n  update_prompt: 'Prompt',\n  update_welcome_message: 'Welcome message',\n  update_knowledge_text: 'Knowledge-base text'\n};\n\nif (!validation_error && !pending_action) {\n  validation_error = 'Use the menu or send an update request such as: update my agent to answer Hello world';\n} else if (!validation_error && !update_text) {\n  validation_error = 'Send non-empty text for this update.';\n} else if (!validation_error && pending_action === 'update_knowledge_text' && /^https?:\\/\\//i.test(update_text)) {\n  validation_error = 'URL ingestion is not supported. Send plain text instead.';\n} else if (!validation_error && update_text.length > limits[pending_action]) {\n  validation_error = labels[pending_action] + ' must be ' + limits[pending_action].toLocaleString('en-US') + ' characters or fewer.';\n}\n\nif (!session.selected_voice_agent_id && agents.length === 1) {\n  session.selected_voice_agent_id = agents[0].id;\n}\n\nconst needs_agent_selection = !validation_error && !session.selected_voice_agent_id;\nconst ai_intent_route = validation_error\n  ? 'validation_error'\n  : needs_agent_selection\n    ? 'agent_list'\n    : 'complete_pending_action';\n\nreturn [{\n  json: {\n    ...context,\n    session,\n    ai_intent: ai,\n    requested_action: null,\n    pending_action,\n    update_text,\n    validation_error,\n    is_valid_update_text: validation_error === null,\n    needs_agent_selection,\n    ai_intent_route\n  },\n  pairedItem: 0\n}];"
+      },
+      "notesInFlow": true,
+      "notes": "Parses the structured OpenAI intent-classification result and validates the requested update before ownership authorization."
+    },
+    {
+      "id": "ai-intent-branch",
+      "name": "AI Intent Branch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        820
+      ],
+      "parameters": {
         "mode": "expression",
-        "output": "={{ $json.freeform_route }}",
+        "output": "={{ $json.ai_intent_route }}",
         "rules": {
           "values": [
             {
@@ -2153,7 +2153,47 @@
         }
       },
       "notesInFlow": true,
-      "notes": "Valid parsed commands continue through the same Authorize Session Agent path used by menu-driven updates."
+      "notes": "Valid AI-parsed commands continue through the same Authorize Session Agent path used by menu-driven updates."
+    },
+    {
+      "id": "classify-telegram-text-with-ai",
+      "name": "Classify Telegram Text With AI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        820
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.OPENAI_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  model: 'gpt-5.4-nano',\n  store: false,\n  input: $json.message_text,\n  instructions: 'Classify a Telegram message for an ElevenLabs agent manager. Return only structured JSON. Supported actions: update_prompt changes the agent system prompt or behavior; update_welcome_message changes the first/welcome message; update_knowledge_text adds plain text content to the knowledge base. If the user is only chatting, testing, greeting, or the requested operation is unclear, return action none. Extract only the new content as update_text. Correct obvious typos such as messeaeg/message. Do not invent content.',\n  text: {\n    format: {\n      type: 'json_schema',\n      name: 'telegram_agent_update_intent',\n      strict: true,\n      schema: {\n        type: 'object',\n        additionalProperties: false,\n        properties: {\n          action: { type: 'string', enum: ['update_prompt', 'update_welcome_message', 'update_knowledge_text', 'none'] },\n          update_text: { type: 'string' }\n        },\n        required: ['action', 'update_text']\n      }\n    }\n  }\n} }",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Uses OpenAI Responses API with gpt-5.4-nano and Structured Outputs to classify natural-language Telegram update requests."
     }
   ],
   "connections": {
@@ -2385,7 +2425,7 @@
         ],
         [
           {
-            "node": "Parse Freeform Command",
+            "node": "Classify Telegram Text With AI",
             "type": "main",
             "index": 0
           }
@@ -3018,18 +3058,29 @@
         ]
       ]
     },
-    "Parse Freeform Command": {
+    "Classify Telegram Text With AI": {
       "main": [
         [
           {
-            "node": "Freeform Command Branch",
+            "node": "Parse AI Intent",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Freeform Command Branch": {
+    "Parse AI Intent": {
+      "main": [
+        [
+          {
+            "node": "AI Intent Branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Intent Branch": {
       "main": [
         [
           {

@@ -6,6 +6,15 @@
 - `PATCH https://api.elevenlabs.io/v1/convai/agents/{agent_id}`
 - `POST https://api.elevenlabs.io/v1/convai/knowledge-base/text`
 
+## OpenAI Intent Classification
+
+- `POST https://api.openai.com/v1/responses`
+- Model: `gpt-5.4-nano`
+- Purpose: classify natural-language Telegram messages into one of `update_prompt`, `update_welcome_message`, `update_knowledge_text`, or `none`.
+- Output mode: Structured Outputs with a strict JSON schema.
+
+The AI step does not bypass authorization. Its output is validated, then routed through the same MySQL ownership check before any ElevenLabs API call.
+
 ## Official Docs Checked
 
 - https://elevenlabs.io/docs/api-reference/agents/get
