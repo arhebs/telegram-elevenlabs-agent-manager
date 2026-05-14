@@ -1,0 +1,2979 @@
+{
+  "id": "telegram-elevenlabs-agent-manager",
+  "name": "Telegram ElevenLabs Agent Manager",
+  "nodes": [
+    {
+      "id": "entry",
+      "name": "Entry",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -920,
+        -420
+      ],
+      "parameters": {
+        "content": "Telegram Trigger polling is the selected entry mode. If converted to Webhook mode, validate X-Telegram-Bot-Api-Secret-Token before any MySQL or ElevenLabs node.",
+        "width": 360,
+        "height": 220,
+        "color": 5
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "db-load",
+      "name": "DB Load",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -420,
+        -420
+      ],
+      "parameters": {
+        "content": "Load active user, ensure session, load session and agents, then collapse MySQL multi-row output into one context item.",
+        "width": 360,
+        "height": 220,
+        "color": 5
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "main-routing",
+      "name": "Main Routing",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        260,
+        -420
+      ],
+      "parameters": {
+        "content": "Route /start, /menu, /cancel, callback actions, agent selection, pending text, unsupported payloads, and fallback inputs.",
+        "width": 360,
+        "height": 220,
+        "color": 5
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "authorization",
+      "name": "Authorization",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        980,
+        -420
+      ],
+      "parameters": {
+        "content": "Every callback uses internal voice_agents.id and is re-authorized against the current Telegram user before session writes or ElevenLabs calls.",
+        "width": 360,
+        "height": 220,
+        "color": 5
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "prompt-update",
+      "name": "Prompt Update",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1700,
+        -420
+      ],
+      "parameters": {
+        "content": "GET + merge + PATCH conversation_config.agent.prompt.prompt. HTTP nodes use full response and Never Error.",
+        "width": 360,
+        "height": 220,
+        "color": 5
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "welcome-update",
+      "name": "Welcome Update",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1700,
+        20
+      ],
+      "parameters": {
+        "content": "GET + merge + PATCH conversation_config.agent.first_message. HTTP nodes use full response and Never Error.",
+        "width": 360,
+        "height": 220,
+        "color": 5
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "knowledge-update",
+      "name": "Knowledge Update",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1700,
+        460
+      ],
+      "parameters": {
+        "content": "Create text KB document, GET agent, append to knowledge_base, PATCH agent, and persist orphan row if attach fails.",
+        "width": 360,
+        "height": 220,
+        "color": 5
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "responses",
+      "name": "Responses",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        260,
+        760
+      ],
+      "parameters": {
+        "content": "Telegram user-facing responses are explicit. Database failures that still have chat_id send Temporary database error. Please try again later.",
+        "width": 360,
+        "height": 220,
+        "color": 5
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "session-concurrency-note",
+      "name": "Session concurrency note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        980,
+        760
+      ],
+      "parameters": {
+        "content": "Session state is per Telegram user. Rapid same-user messages may race; the MVP re-reads user_sessions at execution start and keeps cancel/update completion idempotent. No locks are used.",
+        "width": 360,
+        "height": 220,
+        "color": 5
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "telegram-trigger",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -900,
+        -40
+      ],
+      "parameters": {
+        "updates": [
+          "message",
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
+      "notesInFlow": true,
+      "notes": "Entry mode selected: Telegram Trigger polling.",
+      "credentials": {
+        "telegramApi": {
+          "id": "replace-telegram-credential-id",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "normalize-telegram-update",
+      "name": "Normalize Telegram Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -680,
+        -40
+      ],
+      "parameters": {
+        "jsCode": "const update = $json;\n\nconst message = update.message || null;\nconst callbackQuery = update.callback_query || null;\n\nconst from = callbackQuery?.from || message?.from || {};\nconst chat = callbackQuery?.message?.chat || message?.chat || {};\n\nreturn [\n  {\n    json: {\n      raw_update: update,\n      telegram_user_id: from.id || null,\n      telegram_username: from.username || null,\n      telegram_first_name: from.first_name || null,\n      chat_id: chat.id || null,\n      update_type: callbackQuery ? 'callback_query' : message ? 'message' : 'unknown',\n      message_text: typeof message?.text === 'string' ? message.text.trim() : null,\n      callback_data: typeof callbackQuery?.data === 'string' ? callbackQuery.data : null,\n      callback_query_id: callbackQuery?.id || null,\n      has_unsupported_payload: Boolean(\n        message?.document ||\n        message?.audio ||\n        message?.photo ||\n        message?.voice ||\n        message?.video\n      ),\n      is_url_like_text: typeof message?.text === 'string'\n        ? /^https?:\\/\\//i.test(message.text.trim())\n        : false\n    },\n    pairedItem: 0\n  }\n];"
+      },
+      "notesInFlow": true,
+      "notes": "Normalizes message and callback_query payloads into consistent workflow fields."
+    },
+    {
+      "id": "has-valid-telegram-context",
+      "name": "Has Valid Telegram Context",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -460,
+        -40
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.telegram_user_id }}",
+              "operator": {
+                "type": "number",
+                "operation": "exists"
+              },
+              "rightValue": ""
+            },
+            {
+              "leftValue": "={{ $json.chat_id }}",
+              "operator": {
+                "type": "number",
+                "operation": "exists"
+              },
+              "rightValue": ""
+            }
+          ]
+        }
+      },
+      "notesInFlow": true,
+      "notes": "If telegram_user_id or chat_id is missing, stop before MySQL, Telegram, or ElevenLabs."
+    },
+    {
+      "id": "load-active-telegram-user",
+      "name": "Load Active Telegram User",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        -240,
+        -120
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT *\nFROM telegram_users\nWHERE telegram_user_id = $1\n  AND is_active = TRUE;",
+        "options": {
+          "queryParameters": "={{ [Number($json.telegram_user_id)] }}"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Loads current active Telegram user.\nUse Query Parameters, not raw expression interpolation. Query Parameters: ={{ [Number($json.telegram_user_id)] }}",
+      "continueOnFail": true,
+      "credentials": {
+        "mySql": {
+          "id": "replace-mysql-credential-id",
+          "name": "MySQL Telegram Agent Manager"
+        }
+      }
+    },
+    {
+      "id": "has-active-user",
+      "name": "Has Active User",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -20,
+        -120
+      ],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $items(\"Load Active Telegram User\").length }}",
+              "operator": {
+                "type": "number",
+                "operation": "larger"
+              },
+              "rightValue": 0
+            }
+          ]
+        }
+      },
+      "notesInFlow": true,
+      "notes": "No rows -> No voice agents are linked to your Telegram account."
+    },
+    {
+      "id": "ensure-user-session",
+      "name": "Ensure User Session",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        200,
+        -180
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO user_sessions (user_id, selected_voice_agent_id, pending_action)\nVALUES ($1, NULL, NULL)\nON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP;",
+        "options": {
+          "queryParameters": "={{ [Number($node[\"Load Active Telegram User\"].json.id)] }}"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Ensures every active user has one session row.\nUse Query Parameters, not raw expression interpolation. Query Parameters: ={{ [Number($node[\"Load Active Telegram User\"].json.id)] }}",
+      "continueOnFail": true,
+      "credentials": {
+        "mySql": {
+          "id": "replace-mysql-credential-id",
+          "name": "MySQL Telegram Agent Manager"
+        }
+      }
+    },
+    {
+      "id": "load-user-session",
+      "name": "Load User Session",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        420,
+        -220
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT *\nFROM user_sessions\nWHERE user_id = $1;",
+        "options": {
+          "queryParameters": "={{ [Number($node[\"Load Active Telegram User\"].json.id)] }}"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Loads selected agent and pending action before routing.\nUse Query Parameters, not raw expression interpolation. Query Parameters: ={{ [Number($node[\"Load Active Telegram User\"].json.id)] }}",
+      "continueOnFail": true,
+      "credentials": {
+        "mySql": {
+          "id": "replace-mysql-credential-id",
+          "name": "MySQL Telegram Agent Manager"
+        }
+      }
+    },
+    {
+      "id": "load-user-agents",
+      "name": "Load User Agents",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        420,
+        -40
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT va.id, va.agent_name\nFROM voice_agents va\nWHERE va.user_id = $1\nORDER BY va.agent_name ASC;",
+        "options": {
+          "queryParameters": "={{ [Number($node[\"Load Active Telegram User\"].json.id)] }}"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Loads only agents owned by the current user.\nUse Query Parameters, not raw expression interpolation. Query Parameters: ={{ [Number($node[\"Load Active Telegram User\"].json.id)] }}",
+      "continueOnFail": true,
+      "credentials": {
+        "mySql": {
+          "id": "replace-mysql-credential-id",
+          "name": "MySQL Telegram Agent Manager"
+        }
+      }
+    },
+    {
+      "id": "build-workflow-context",
+      "name": "Build Workflow Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "const normalized = $('Normalize Telegram Update').first().json;\nconst userItems = $items('Load Active Telegram User');\nconst sessionItems = $items('Load User Session');\nconst agentItems = $items('Load User Agents');\n\nconst user = userItems[0]?.json || null;\nconst session = sessionItems[0]?.json || null;\nconst agents = agentItems.map(item => item.json);\n\nreturn [\n  {\n    json: {\n      ...normalized,\n      user,\n      session,\n      agents,\n      has_user: Boolean(user),\n      has_agents: agents.length > 0\n    },\n    pairedItem: 0\n  }\n];"
+      },
+      "notesInFlow": true,
+      "notes": "Outputs exactly one item with normalized fields, user, session, and agents[]."
+    },
+    {
+      "id": "database-error-guard",
+      "name": "Database Error Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        40
+      ],
+      "parameters": {
+        "jsCode": "const checks = [\n  'Load Active Telegram User',\n  'Ensure User Session',\n  'Load User Session',\n  'Load User Agents'\n];\n\nconst db_errors = [];\nfor (const nodeName of checks) {\n  try {\n    for (const item of $items(nodeName)) {\n      if (item.json?.error || item.json?.message?.includes?.('SQL') || item.json?.code?.startsWith?.('ER_')) {\n        db_errors.push({ node: nodeName, error: item.json.error || item.json.message || item.json.code });\n      }\n    }\n  } catch (error) {}\n}\n\nreturn [{\n  json: {\n    ...$json,\n    has_database_error: db_errors.length > 0,\n    db_errors\n  },\n  pairedItem: 0\n}];"
+      },
+      "notesInFlow": true,
+      "notes": "Detects local MySQL continue-on-fail outputs after initial read/upsert nodes and routes to the user-facing temporary database error."
+    },
+    {
+      "id": "database-status-branch",
+      "name": "Database Status Branch",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        900,
+        40
+      ],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.has_database_error }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "false"
+              },
+              "rightValue": false
+            }
+          ]
+        }
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "has-user-agents",
+      "name": "Has User Agents",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        -120
+      ],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.has_agents }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              },
+              "rightValue": true
+            }
+          ]
+        }
+      },
+      "notesInFlow": true,
+      "notes": "No agents -> No voice agents are linked to your Telegram account."
+    },
+    {
+      "id": "answer-callback-query",
+      "name": "Answer Callback Query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        -120
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/answerCallbackQuery",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { callback_query_id: $json.callback_query_id } }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "notesInFlow": true,
+      "notes": "HTTP fallback for answerCallbackQuery. Every callback route passes this pattern; configure TELEGRAM_BOT_TOKEN if the Telegram node cannot answer callbacks directly.",
+      "continueOnFail": true
+    },
+    {
+      "id": "route-telegram-update",
+      "name": "Route Telegram Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "const text = $json.message_text;\nconst data = $json.callback_data;\nconst pendingAction = $json.session?.pending_action;\n\nlet route = 'main_menu';\nif (text === '/start') route = 'main_menu';\nelse if (text === '/menu') route = 'main_menu';\nelse if (text === '/cancel' || data === 'action:cancel') route = 'cancel';\nelse if (data === 'menu:select_agent') route = 'agent_list';\nelse if (typeof data === 'string' && data.startsWith('agent:select:')) route = 'select_agent';\nelse if (typeof data === 'string' && data.startsWith('action:')) route = 'start_pending_action';\nelse if ($json.has_unsupported_payload) route = 'unsupported_payload';\nelse if (text && pendingAction) route = 'complete_pending_action';\n\nreturn [{ json: { ...$json, route }, pairedItem: 0 }];"
+      },
+      "notesInFlow": true,
+      "notes": "Routes message_text == /start, /menu, /cancel; callback_data menu/action/agent; unsupported payloads; pending text; fallback main menu."
+    },
+    {
+      "id": "route-branch",
+      "name": "Route Branch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        -120
+      ],
+      "parameters": {
+        "mode": "expression",
+        "output": "={{ $json.route }}",
+        "rules": {
+          "values": [
+            {
+              "outputKey": "main_menu"
+            },
+            {
+              "outputKey": "cancel"
+            },
+            {
+              "outputKey": "agent_list"
+            },
+            {
+              "outputKey": "select_agent"
+            },
+            {
+              "outputKey": "start_pending_action"
+            },
+            {
+              "outputKey": "unsupported_payload"
+            },
+            {
+              "outputKey": "complete_pending_action"
+            }
+          ]
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Named switch for the top-level route outputs."
+    },
+    {
+      "id": "send-main-menu",
+      "name": "Send Main Menu",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1760,
+        -260
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "Select an option.",
+        "additionalFields": {
+          "replyMarkup": "{\"inline_keyboard\":[[{\"text\":\"Select Agent\",\"callback_data\":\"menu:select_agent\"}],[{\"text\":\"Update Prompt\",\"callback_data\":\"action:update_prompt\"}],[{\"text\":\"Update Welcome Message\",\"callback_data\":\"action:update_welcome_message\"}],[{\"text\":\"Update Knowledge Base\",\"callback_data\":\"action:update_knowledge_text\"}],[{\"text\":\"Cancel\",\"callback_data\":\"action:cancel\"}]]}"
+        }
+      },
+      "notesInFlow": false,
+      "credentials": {
+        "telegramApi": {
+          "id": "replace-telegram-credential-id",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "send-no-agents",
+      "name": "Send No Agents",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        200,
+        140
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "No voice agents are linked to your Telegram account.",
+        "additionalFields": {}
+      },
+      "notesInFlow": false,
+      "credentials": {
+        "telegramApi": {
+          "id": "replace-telegram-credential-id",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "send-temporary-database-error",
+      "name": "Send Temporary Database Error",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        420,
+        140
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "Temporary database error. Please try again later.",
+        "additionalFields": {}
+      },
+      "notesInFlow": false,
+      "credentials": {
+        "telegramApi": {
+          "id": "replace-telegram-credential-id",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "cancel-flow",
+      "name": "Cancel Flow",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        1760,
+        -80
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE user_sessions\nSET pending_action = NULL\nWHERE user_id = $1;",
+        "options": {
+          "queryParameters": "={{ [Number($json.user.id)] }}"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Clears pending_action and preserves selected_voice_agent_id.\nUse Query Parameters, not raw expression interpolation. Query Parameters: ={{ [Number($json.user.id)] }}",
+      "continueOnFail": true,
+      "credentials": {
+        "mySql": {
+          "id": "replace-mysql-credential-id",
+          "name": "MySQL Telegram Agent Manager"
+        }
+      }
+    },
+    {
+      "id": "send-canceled",
+      "name": "Send Canceled",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1980,
+        -80
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "Canceled.",
+        "additionalFields": {
+          "replyMarkup": "{\"inline_keyboard\":[[{\"text\":\"Select Agent\",\"callback_data\":\"menu:select_agent\"}],[{\"text\":\"Update Prompt\",\"callback_data\":\"action:update_prompt\"}],[{\"text\":\"Update Welcome Message\",\"callback_data\":\"action:update_welcome_message\"}],[{\"text\":\"Update Knowledge Base\",\"callback_data\":\"action:update_knowledge_text\"}],[{\"text\":\"Cancel\",\"callback_data\":\"action:cancel\"}]]}"
+        }
+      },
+      "notesInFlow": false,
+      "credentials": {
+        "telegramApi": {
+          "id": "replace-telegram-credential-id",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "build-agent-selection-keyboard",
+      "name": "Build Agent Selection Keyboard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        100
+      ],
+      "parameters": {
+        "jsCode": "const agents = $json.agents || [];\n\nreturn [\n  {\n    json: {\n      ...$json,\n      text: 'Choose an agent first.',\n      reply_markup: {\n        inline_keyboard: agents.map(agent => [\n          {\n            text: agent.agent_name,\n            callback_data: `agent:select:${agent.id}`\n          }\n        ])\n      }\n    },\n    pairedItem: 0\n  }\n];"
+      },
+      "notesInFlow": true,
+      "notes": "Builds one inline button per owned agent using internal voice_agents.id."
+    },
+    {
+      "id": "send-agent-list",
+      "name": "Send Agent List",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1980,
+        100
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "replyMarkup": "{\"inline_keyboard\":\"={{ $json.reply_markup.inline_keyboard }}\"}"
+        }
+      },
+      "notesInFlow": false,
+      "credentials": {
+        "telegramApi": {
+          "id": "replace-telegram-credential-id",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "parse-selected-agent-callback",
+      "name": "Parse Selected Agent Callback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        280
+      ],
+      "parameters": {
+        "jsCode": "const callbackData = $json.callback_data || '';\nconst match = callbackData.match(/^agent:select:(\\d+)$/);\n\nreturn [\n  {\n    json: {\n      ...$json,\n      requested_voice_agent_id: match ? Number(match[1]) : null\n    },\n    pairedItem: 0\n  }\n];"
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "authorize-selected-agent",
+      "name": "Authorize Selected Agent",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        1980,
+        280
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT va.*\nFROM voice_agents va\nJOIN telegram_users tu ON tu.id = va.user_id\nWHERE tu.telegram_user_id = $1\n  AND tu.is_active = TRUE\n  AND va.id = $2;",
+        "options": {
+          "queryParameters": "={{ [Number($json.telegram_user_id), Number($json.requested_voice_agent_id)] }}"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Authorizes selected internal voice_agents.id against current Telegram user.\nUse Query Parameters, not raw expression interpolation. Query Parameters: ={{ [Number($json.telegram_user_id), Number($json.requested_voice_agent_id)] }}",
+      "continueOnFail": true,
+      "credentials": {
+        "mySql": {
+          "id": "replace-mysql-credential-id",
+          "name": "MySQL Telegram Agent Manager"
+        }
+      }
+    },
+    {
+      "id": "has-authorized-selected-agent",
+      "name": "Has Authorized Selected Agent",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        280
+      ],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $items(\"Authorize Selected Agent\").length }}",
+              "operator": {
+                "type": "number",
+                "operation": "larger"
+              },
+              "rightValue": 0
+            }
+          ]
+        }
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "save-selected-agent",
+      "name": "Save Selected Agent",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        2420,
+        220
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE user_sessions\nSET selected_voice_agent_id = $1,\n    pending_action = NULL\nWHERE user_id = $2;",
+        "options": {
+          "queryParameters": "={{ [Number($node[\"Authorize Selected Agent\"].json.id), Number($json.user.id)] }}"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Stores selected agent and clears pending action.\nUse Query Parameters, not raw expression interpolation. Query Parameters: ={{ [Number($node[\"Authorize Selected Agent\"].json.id), Number($json.user.id)] }}",
+      "continueOnFail": true,
+      "credentials": {
+        "mySql": {
+          "id": "replace-mysql-credential-id",
+          "name": "MySQL Telegram Agent Manager"
+        }
+      }
+    },
+    {
+      "id": "send-selected-agent",
+      "name": "Send Selected Agent",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2640,
+        220
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ \"Selected \" + $node[\"Authorize Selected Agent\"].json.agent_name + \".\" }}",
+        "additionalFields": {
+          "replyMarkup": "{\"inline_keyboard\":[[{\"text\":\"Select Agent\",\"callback_data\":\"menu:select_agent\"}],[{\"text\":\"Update Prompt\",\"callback_data\":\"action:update_prompt\"}],[{\"text\":\"Update Welcome Message\",\"callback_data\":\"action:update_welcome_message\"}],[{\"text\":\"Update Knowledge Base\",\"callback_data\":\"action:update_knowledge_text\"}],[{\"text\":\"Cancel\",\"callback_data\":\"action:cancel\"}]]}"
+        }
+      },
+      "notesInFlow": false,
+      "credentials": {
+        "telegramApi": {
+          "id": "replace-telegram-credential-id",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "log-unauthorized-agent-selection",
+      "name": "Log Unauthorized Agent Selection",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        340
+      ],
+      "parameters": {
+        "jsCode": "console.warn(JSON.stringify({\n  attempted_voice_agent_id: $json.requested_voice_agent_id,\n  telegram_user_id: $json.telegram_user_id,\n  action: 'agent_select',\n  input: $json.callback_data || $json.message_text,\n  timestamp: new Date().toISOString(),\n  result: 'rejected'\n}));\nreturn [{ json: { ...$json, unauthorized_message: 'That agent is not available to your account.' }, pairedItem: 0 }];"
+      },
+      "notesInFlow": true,
+      "notes": "Logs cross-user callback attempts in n8n execution output."
+    },
+    {
+      "id": "send-unauthorized-agent",
+      "name": "Send Unauthorized Agent",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2640,
+        340
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "That agent is not available to your account.",
+        "additionalFields": {}
+      },
+      "notesInFlow": false,
+      "credentials": {
+        "telegramApi": {
+          "id": "replace-telegram-credential-id",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "parse-action-callback",
+      "name": "Parse Action Callback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        520
+      ],
+      "parameters": {
+        "jsCode": "const allowed = new Set([\n  'update_prompt',\n  'update_welcome_message',\n  'update_knowledge_text'\n]);\n\nconst callbackData = $json.callback_data || '';\nconst action = callbackData.startsWith('action:')\n  ? callbackData.slice('action:'.length)\n  : null;\n\nreturn [\n  {\n    json: {\n      ...$json,\n      requested_action: allowed.has(action) ? action : null\n    },\n    pairedItem: 0\n  }\n];"
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "has-selected-agent-for-action",
+      "name": "Has Selected Agent For Action",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        520
+      ],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.session.selected_voice_agent_id }}",
+              "operator": {
+                "type": "number",
+                "operation": "exists"
+              },
+              "rightValue": ""
+            }
+          ]
+        }
+      },
+      "notesInFlow": true,
+      "notes": "If no selected agent, respond Choose an agent first and show selection keyboard."
+    },
+    {
+      "id": "authorize-session-agent",
+      "name": "Authorize Session Agent",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        2200,
+        500
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT va.*\nFROM voice_agents va\nJOIN telegram_users tu ON tu.id = va.user_id\nWHERE tu.telegram_user_id = $1\n  AND tu.is_active = TRUE\n  AND va.id = $2;",
+        "options": {
+          "queryParameters": "={{ [Number($json.telegram_user_id), Number($json.session.selected_voice_agent_id)] }}"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Re-authorizes selected session agent before starting an action and before completing pending text.\nUse Query Parameters, not raw expression interpolation. Query Parameters: ={{ [Number($json.telegram_user_id), Number($json.session.selected_voice_agent_id)] }}",
+      "continueOnFail": true,
+      "credentials": {
+        "mySql": {
+          "id": "replace-mysql-credential-id",
+          "name": "MySQL Telegram Agent Manager"
+        }
+      }
+    },
+    {
+      "id": "has-authorized-session-agent",
+      "name": "Has Authorized Session Agent",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        500
+      ],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $items(\"Authorize Session Agent\").length }}",
+              "operator": {
+                "type": "number",
+                "operation": "larger"
+              },
+              "rightValue": 0
+            }
+          ]
+        }
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "route-after-session-authorization",
+      "name": "Route After Session Authorization",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        500
+      ],
+      "parameters": {
+        "jsCode": "const context = $('Build Workflow Context').first().json;\nlet validation = {};\ntry {\n  validation = $('Validate Pending Text').first().json;\n} catch (error) {}\n\nconst requestedAction = $json.requested_action || (() => {\n  try {\n    return $('Parse Action Callback').first().json.requested_action;\n  } catch (error) {\n    return null;\n  }\n})();\n\nconst pendingAction = validation.pending_action || context.session?.pending_action || null;\nconst auth_route = requestedAction ? 'store_pending_action' : 'complete_pending_action';\n\nreturn [{\n  json: {\n    ...context,\n    ...validation,\n    requested_action: requestedAction,\n    pending_action: pendingAction,\n    auth_route,\n    authorized_agent_id: $json.id,\n    elevenlabs_agent_id: $json.elevenlabs_agent_id,\n    agent_name: $json.agent_name\n  },\n  pairedItem: 0\n}];"
+      },
+      "notesInFlow": true,
+      "notes": "Rebuilds the workflow context after the MySQL authorization row and chooses whether to store a new pending action or complete pending text."
+    },
+    {
+      "id": "authorized-session-branch",
+      "name": "Authorized Session Branch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        500
+      ],
+      "parameters": {
+        "mode": "expression",
+        "output": "={{ $json.auth_route }}",
+        "rules": {
+          "values": [
+            {
+              "outputKey": "store_pending_action"
+            },
+            {
+              "outputKey": "complete_pending_action"
+            }
+          ]
+        }
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "clear-invalid-selected-agent",
+      "name": "Clear Invalid Selected Agent",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        2640,
+        620
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE user_sessions\nSET selected_voice_agent_id = NULL,\n    pending_action = NULL\nWHERE user_id = $1;",
+        "options": {
+          "queryParameters": "={{ [Number($json.user.id)] }}"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Clears selected agent and pending action when selected agent is deleted or no longer owned.\nUse Query Parameters, not raw expression interpolation. Query Parameters: ={{ [Number($json.user.id)] }}",
+      "continueOnFail": true,
+      "credentials": {
+        "mySql": {
+          "id": "replace-mysql-credential-id",
+          "name": "MySQL Telegram Agent Manager"
+        }
+      }
+    },
+    {
+      "id": "send-invalid-selected-agent",
+      "name": "Send Invalid Selected Agent",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2860,
+        620
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "That agent is no longer available. Choose another agent.",
+        "additionalFields": {}
+      },
+      "notesInFlow": false,
+      "credentials": {
+        "telegramApi": {
+          "id": "replace-telegram-credential-id",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "store-pending-action",
+      "name": "Store Pending Action",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        3080,
+        440
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE user_sessions\nSET pending_action = $1\nWHERE user_id = $2;",
+        "options": {
+          "queryParameters": "={{ [$json.requested_action, Number($json.user.id)] }}"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Stores whitelisted pending action only.\nUse Query Parameters, not raw expression interpolation. Query Parameters: ={{ [$json.requested_action, Number($json.user.id)] }}",
+      "continueOnFail": true,
+      "credentials": {
+        "mySql": {
+          "id": "replace-mysql-credential-id",
+          "name": "MySQL Telegram Agent Manager"
+        }
+      }
+    },
+    {
+      "id": "send-action-prompt",
+      "name": "Send Action Prompt",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3300,
+        440
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ ({\n  update_prompt: 'Selected agent: ' + $node[\"Authorize Session Agent\"].json.agent_name + '. Send the new prompt text.',\n  update_welcome_message: 'Selected agent: ' + $node[\"Authorize Session Agent\"].json.agent_name + '. Send the new welcome message.',\n  update_knowledge_text: 'Selected agent: ' + $node[\"Authorize Session Agent\"].json.agent_name + '. Send the knowledge-base text to add.'\n})[$json.requested_action] || 'Choose an agent first.' }}",
+        "additionalFields": {}
+      },
+      "notesInFlow": false,
+      "credentials": {
+        "telegramApi": {
+          "id": "replace-telegram-credential-id",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "send-choose-agent-first",
+      "name": "Send Choose Agent First",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2200,
+        640
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "Choose an agent first.",
+        "additionalFields": {}
+      },
+      "notesInFlow": false,
+      "credentials": {
+        "telegramApi": {
+          "id": "replace-telegram-credential-id",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "send-unsupported-payload",
+      "name": "Send Unsupported Payload",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1760,
+        700
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "Send plain text for this update.",
+        "additionalFields": {}
+      },
+      "notesInFlow": false,
+      "credentials": {
+        "telegramApi": {
+          "id": "replace-telegram-credential-id",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "validate-pending-text",
+      "name": "Validate Pending Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        900
+      ],
+      "parameters": {
+        "jsCode": "const text = ($json.message_text || '').trim();\nconst pendingAction = $json.session?.pending_action || null;\n\nconst limits = {\n  update_prompt: 4000,\n  update_welcome_message: 500,\n  update_knowledge_text: 2000\n};\n\nconst labels = {\n  update_prompt: 'Prompt',\n  update_welcome_message: 'Welcome message',\n  update_knowledge_text: 'Knowledge-base text'\n};\n\nconst limit = limits[pendingAction] || 0;\nlet validation_error = null;\n\nif (!pendingAction || !limit) {\n  validation_error = 'No update action is waiting for text.';\n} else if (!text) {\n  validation_error = 'Send non-empty text for this update.';\n} else if (pendingAction === 'update_knowledge_text' && /^https?:\\/\\//i.test(text)) {\n  validation_error = 'URL ingestion is not supported. Send plain text instead.';\n} else if (text.length > limit) {\n  validation_error = `${labels[pendingAction]} must be ${limit.toLocaleString('en-US')} characters or fewer.`;\n}\n\nreturn [\n  {\n    json: {\n      ...$json,\n      pending_action: pendingAction,\n      update_text: text,\n      validation_error,\n      is_valid_update_text: validation_error === null\n    },\n    pairedItem: 0\n  }\n];"
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "is-valid-update-text",
+      "name": "Is Valid Update Text",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        900
+      ],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.is_valid_update_text }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              },
+              "rightValue": true
+            }
+          ]
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Invalid empty/too-long/URL-like text keeps pending_action so the user can retry."
+    },
+    {
+      "id": "send-validation-error",
+      "name": "Send Validation Error",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2200,
+        1020
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.validation_error }}",
+        "additionalFields": {}
+      },
+      "notesInFlow": false,
+      "credentials": {
+        "telegramApi": {
+          "id": "replace-telegram-credential-id",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "route-pending-action",
+      "name": "Route Pending Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        860
+      ],
+      "parameters": {
+        "mode": "expression",
+        "output": "={{ $json.pending_action }}",
+        "rules": {
+          "values": [
+            {
+              "outputKey": "update_prompt"
+            },
+            {
+              "outputKey": "update_welcome_message"
+            },
+            {
+              "outputKey": "update_knowledge_text"
+            }
+          ]
+        }
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "get-elevenlabs-agent-for-prompt-merge",
+      "name": "Get ElevenLabs Agent For Prompt Merge",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        760
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ \"https://api.elevenlabs.io/v1/convai/agents/\" + $json.elevenlabs_agent_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Read current agent config before prompt merge.\nEnable full response/status/headers and Never Error. Configure httpHeaderAuth so it sends xi-api-key.",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "replace-elevenlabs-credential-id",
+          "name": "ElevenLabs API Key"
+        }
+      }
+    },
+    {
+      "id": "map-elevenlabs-error",
+      "name": "Map ElevenLabs Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        760
+      ],
+      "parameters": {
+        "jsCode": "const status = Number(\n  $json.statusCode ||\n  $json.status ||\n  $json.response?.statusCode ||\n  $json.error?.statusCode ||\n  0\n);\n\nconst responseBody = $json.body || $json.response?.body || $json.error?.response?.body || $json;\n\nlet user_message = null;\nlet clear_pending_action = false;\nlet clear_selected_agent = false;\nlet log_level = 'info';\n\nif (status >= 200 && status < 300) {\n  user_message = null;\n} else if (status === 404) {\n  user_message = 'That agent is no longer available. Choose another agent.';\n  clear_pending_action = true;\n  clear_selected_agent = true;\n  log_level = 'warn';\n} else if (status === 401 || status === 403) {\n  user_message = 'ElevenLabs authentication failed. Please contact support.';\n  clear_pending_action = true;\n  log_level = 'error';\n} else if (status === 422) {\n  user_message = 'Update failed. Please review the text and try again.';\n  clear_pending_action = false;\n  log_level = 'warn';\n} else if (status === 429) {\n  user_message = 'Too many requests. Please wait a moment and try again.';\n  clear_pending_action = false;\n  log_level = 'warn';\n} else if (status > 0) {\n  user_message = 'Update failed. Please try again later.';\n  clear_pending_action = false;\n  log_level = 'error';\n}\n\nreturn [\n  {\n    json: {\n      ...$json,\n      elevenlabs_status: status,\n      elevenlabs_response_body: responseBody,\n      elevenlabs_is_success: status >= 200 && status < 300,\n      user_message,\n      clear_pending_action,\n      clear_selected_agent,\n      log_level\n    },\n    pairedItem: 0\n  }\n];"
+      },
+      "notesInFlow": true,
+      "notes": "Shared mapper logic after ElevenLabs operations. This instance handles prompt GET."
+    },
+    {
+      "id": "prompt-get-success",
+      "name": "Prompt Get Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        760
+      ],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.elevenlabs_is_success }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              },
+              "rightValue": true
+            }
+          ]
+        }
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "merge-prompt-update",
+      "name": "Merge Prompt Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        700
+      ],
+      "parameters": {
+        "jsCode": "const agentResponse = $node['Get ElevenLabs Agent For Prompt Merge'].json;\nconst agentConfig = agentResponse.body || agentResponse;\nconst context = $node['Route After Session Authorization'].json;\nconst conversationConfig = agentConfig.conversation_config || {};\nconversationConfig.agent = conversationConfig.agent || {};\nconversationConfig.agent.prompt = conversationConfig.agent.prompt || {};\nconversationConfig.agent.prompt.prompt = context.update_text;\n\nreturn [{ json: { ...context, conversation_config: conversationConfig }, pairedItem: 0 }];"
+      },
+      "notesInFlow": true,
+      "notes": "Merges update_text into conversation_config.agent.prompt.prompt."
+    },
+    {
+      "id": "patch-elevenlabs-prompt",
+      "name": "Patch ElevenLabs Prompt",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3300,
+        700
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ \"https://api.elevenlabs.io/v1/convai/agents/\" + $node[\"Route After Session Authorization\"].json.elevenlabs_agent_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { conversation_config: $json.conversation_config } }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Patches merged prompt conversation_config.\nEnable full response/status/headers and Never Error. Configure httpHeaderAuth so it sends xi-api-key.",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "replace-elevenlabs-credential-id",
+          "name": "ElevenLabs API Key"
+        }
+      }
+    },
+    {
+      "id": "map-prompt-patch-error",
+      "name": "Map Prompt Patch Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        700
+      ],
+      "parameters": {
+        "jsCode": "const status = Number(\n  $json.statusCode ||\n  $json.status ||\n  $json.response?.statusCode ||\n  $json.error?.statusCode ||\n  0\n);\n\nconst responseBody = $json.body || $json.response?.body || $json.error?.response?.body || $json;\n\nlet user_message = null;\nlet clear_pending_action = false;\nlet clear_selected_agent = false;\nlet log_level = 'info';\n\nif (status >= 200 && status < 300) {\n  user_message = null;\n} else if (status === 404) {\n  user_message = 'That agent is no longer available. Choose another agent.';\n  clear_pending_action = true;\n  clear_selected_agent = true;\n  log_level = 'warn';\n} else if (status === 401 || status === 403) {\n  user_message = 'ElevenLabs authentication failed. Please contact support.';\n  clear_pending_action = true;\n  log_level = 'error';\n} else if (status === 422) {\n  user_message = 'Update failed. Please review the text and try again.';\n  clear_pending_action = false;\n  log_level = 'warn';\n} else if (status === 429) {\n  user_message = 'Too many requests. Please wait a moment and try again.';\n  clear_pending_action = false;\n  log_level = 'warn';\n} else if (status > 0) {\n  user_message = 'Update failed. Please try again later.';\n  clear_pending_action = false;\n  log_level = 'error';\n}\n\nreturn [\n  {\n    json: {\n      ...$json,\n      elevenlabs_status: status,\n      elevenlabs_response_body: responseBody,\n      elevenlabs_is_success: status >= 200 && status < 300,\n      user_message,\n      clear_pending_action,\n      clear_selected_agent,\n      log_level\n    },\n    pairedItem: 0\n  }\n];"
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "prompt-patch-success",
+      "name": "Prompt Patch Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        700
+      ],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.elevenlabs_is_success }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              },
+              "rightValue": true
+            }
+          ]
+        }
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "get-elevenlabs-agent-for-welcome-merge",
+      "name": "Get ElevenLabs Agent For Welcome Merge",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        920
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ \"https://api.elevenlabs.io/v1/convai/agents/\" + $json.elevenlabs_agent_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Read current agent config before welcome merge.\nEnable full response/status/headers and Never Error. Configure httpHeaderAuth so it sends xi-api-key.",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "replace-elevenlabs-credential-id",
+          "name": "ElevenLabs API Key"
+        }
+      }
+    },
+    {
+      "id": "map-welcome-get-error",
+      "name": "Map Welcome Get Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        920
+      ],
+      "parameters": {
+        "jsCode": "const status = Number(\n  $json.statusCode ||\n  $json.status ||\n  $json.response?.statusCode ||\n  $json.error?.statusCode ||\n  0\n);\n\nconst responseBody = $json.body || $json.response?.body || $json.error?.response?.body || $json;\n\nlet user_message = null;\nlet clear_pending_action = false;\nlet clear_selected_agent = false;\nlet log_level = 'info';\n\nif (status >= 200 && status < 300) {\n  user_message = null;\n} else if (status === 404) {\n  user_message = 'That agent is no longer available. Choose another agent.';\n  clear_pending_action = true;\n  clear_selected_agent = true;\n  log_level = 'warn';\n} else if (status === 401 || status === 403) {\n  user_message = 'ElevenLabs authentication failed. Please contact support.';\n  clear_pending_action = true;\n  log_level = 'error';\n} else if (status === 422) {\n  user_message = 'Update failed. Please review the text and try again.';\n  clear_pending_action = false;\n  log_level = 'warn';\n} else if (status === 429) {\n  user_message = 'Too many requests. Please wait a moment and try again.';\n  clear_pending_action = false;\n  log_level = 'warn';\n} else if (status > 0) {\n  user_message = 'Update failed. Please try again later.';\n  clear_pending_action = false;\n  log_level = 'error';\n}\n\nreturn [\n  {\n    json: {\n      ...$json,\n      elevenlabs_status: status,\n      elevenlabs_response_body: responseBody,\n      elevenlabs_is_success: status >= 200 && status < 300,\n      user_message,\n      clear_pending_action,\n      clear_selected_agent,\n      log_level\n    },\n    pairedItem: 0\n  }\n];"
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "welcome-get-success",
+      "name": "Welcome Get Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        920
+      ],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.elevenlabs_is_success }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              },
+              "rightValue": true
+            }
+          ]
+        }
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "merge-welcome-message-update",
+      "name": "Merge Welcome Message Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        900
+      ],
+      "parameters": {
+        "jsCode": "const agentResponse = $node['Get ElevenLabs Agent For Welcome Merge'].json;\nconst agentConfig = agentResponse.body || agentResponse;\nconst context = $node['Route After Session Authorization'].json;\nconst conversationConfig = agentConfig.conversation_config || {};\nconversationConfig.agent = conversationConfig.agent || {};\nconversationConfig.agent.first_message = context.update_text;\n\nreturn [{ json: { ...context, conversation_config: conversationConfig }, pairedItem: 0 }];"
+      },
+      "notesInFlow": true,
+      "notes": "Merges update_text into conversation_config.agent.first_message."
+    },
+    {
+      "id": "patch-elevenlabs-welcome-message",
+      "name": "Patch ElevenLabs Welcome Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3300,
+        900
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ \"https://api.elevenlabs.io/v1/convai/agents/\" + $node[\"Route After Session Authorization\"].json.elevenlabs_agent_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { conversation_config: $json.conversation_config } }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Patches merged welcome message conversation_config.\nEnable full response/status/headers and Never Error. Configure httpHeaderAuth so it sends xi-api-key.",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "replace-elevenlabs-credential-id",
+          "name": "ElevenLabs API Key"
+        }
+      }
+    },
+    {
+      "id": "map-welcome-patch-error",
+      "name": "Map Welcome Patch Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        900
+      ],
+      "parameters": {
+        "jsCode": "const status = Number(\n  $json.statusCode ||\n  $json.status ||\n  $json.response?.statusCode ||\n  $json.error?.statusCode ||\n  0\n);\n\nconst responseBody = $json.body || $json.response?.body || $json.error?.response?.body || $json;\n\nlet user_message = null;\nlet clear_pending_action = false;\nlet clear_selected_agent = false;\nlet log_level = 'info';\n\nif (status >= 200 && status < 300) {\n  user_message = null;\n} else if (status === 404) {\n  user_message = 'That agent is no longer available. Choose another agent.';\n  clear_pending_action = true;\n  clear_selected_agent = true;\n  log_level = 'warn';\n} else if (status === 401 || status === 403) {\n  user_message = 'ElevenLabs authentication failed. Please contact support.';\n  clear_pending_action = true;\n  log_level = 'error';\n} else if (status === 422) {\n  user_message = 'Update failed. Please review the text and try again.';\n  clear_pending_action = false;\n  log_level = 'warn';\n} else if (status === 429) {\n  user_message = 'Too many requests. Please wait a moment and try again.';\n  clear_pending_action = false;\n  log_level = 'warn';\n} else if (status > 0) {\n  user_message = 'Update failed. Please try again later.';\n  clear_pending_action = false;\n  log_level = 'error';\n}\n\nreturn [\n  {\n    json: {\n      ...$json,\n      elevenlabs_status: status,\n      elevenlabs_response_body: responseBody,\n      elevenlabs_is_success: status >= 200 && status < 300,\n      user_message,\n      clear_pending_action,\n      clear_selected_agent,\n      log_level\n    },\n    pairedItem: 0\n  }\n];"
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "welcome-patch-success",
+      "name": "Welcome Patch Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        900
+      ],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.elevenlabs_is_success }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              },
+              "rightValue": true
+            }
+          ]
+        }
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "create-elevenlabs-knowledge-text-document",
+      "name": "Create ElevenLabs Knowledge Text Document",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        1080
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.elevenlabs.io/v1/convai/knowledge-base/text",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { text: $json.update_text, name: $json.agent_name + \" Telegram KB \" + $now.toISO() } }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Creates text knowledge-base document before attachment.\nEnable full response/status/headers and Never Error. Configure httpHeaderAuth so it sends xi-api-key.",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "replace-elevenlabs-credential-id",
+          "name": "ElevenLabs API Key"
+        }
+      }
+    },
+    {
+      "id": "map-knowledge-create-error",
+      "name": "Map Knowledge Create Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        1080
+      ],
+      "parameters": {
+        "jsCode": "const status = Number(\n  $json.statusCode ||\n  $json.status ||\n  $json.response?.statusCode ||\n  $json.error?.statusCode ||\n  0\n);\n\nconst responseBody = $json.body || $json.response?.body || $json.error?.response?.body || $json;\n\nlet user_message = null;\nlet clear_pending_action = false;\nlet clear_selected_agent = false;\nlet log_level = 'info';\n\nif (status >= 200 && status < 300) {\n  user_message = null;\n} else if (status === 404) {\n  user_message = 'That agent is no longer available. Choose another agent.';\n  clear_pending_action = true;\n  clear_selected_agent = true;\n  log_level = 'warn';\n} else if (status === 401 || status === 403) {\n  user_message = 'ElevenLabs authentication failed. Please contact support.';\n  clear_pending_action = true;\n  log_level = 'error';\n} else if (status === 422) {\n  user_message = 'Update failed. Please review the text and try again.';\n  clear_pending_action = false;\n  log_level = 'warn';\n} else if (status === 429) {\n  user_message = 'Too many requests. Please wait a moment and try again.';\n  clear_pending_action = false;\n  log_level = 'warn';\n} else if (status > 0) {\n  user_message = 'Update failed. Please try again later.';\n  clear_pending_action = false;\n  log_level = 'error';\n}\n\nreturn [\n  {\n    json: {\n      ...$json,\n      elevenlabs_status: status,\n      elevenlabs_response_body: responseBody,\n      elevenlabs_is_success: status >= 200 && status < 300,\n      user_message,\n      clear_pending_action,\n      clear_selected_agent,\n      log_level\n    },\n    pairedItem: 0\n  }\n];"
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "knowledge-create-success",
+      "name": "Knowledge Create Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        1080
+      ],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.elevenlabs_is_success }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              },
+              "rightValue": true
+            }
+          ]
+        }
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "get-elevenlabs-agent-for-knowledge-merge",
+      "name": "Get ElevenLabs Agent For Knowledge Merge",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3080,
+        1060
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ \"https://api.elevenlabs.io/v1/convai/agents/\" + $node[\"Route After Session Authorization\"].json.elevenlabs_agent_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Reads current agent config before appending knowledge-base document.\nEnable full response/status/headers and Never Error. Configure httpHeaderAuth so it sends xi-api-key.",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "replace-elevenlabs-credential-id",
+          "name": "ElevenLabs API Key"
+        }
+      }
+    },
+    {
+      "id": "map-knowledge-get-error",
+      "name": "Map Knowledge Get Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        1060
+      ],
+      "parameters": {
+        "jsCode": "const status = Number(\n  $json.statusCode ||\n  $json.status ||\n  $json.response?.statusCode ||\n  $json.error?.statusCode ||\n  0\n);\n\nconst responseBody = $json.body || $json.response?.body || $json.error?.response?.body || $json;\n\nlet user_message = null;\nlet clear_pending_action = false;\nlet clear_selected_agent = false;\nlet log_level = 'info';\n\nif (status >= 200 && status < 300) {\n  user_message = null;\n} else if (status === 404) {\n  user_message = 'That agent is no longer available. Choose another agent.';\n  clear_pending_action = true;\n  clear_selected_agent = true;\n  log_level = 'warn';\n} else if (status === 401 || status === 403) {\n  user_message = 'ElevenLabs authentication failed. Please contact support.';\n  clear_pending_action = true;\n  log_level = 'error';\n} else if (status === 422) {\n  user_message = 'Update failed. Please review the text and try again.';\n  clear_pending_action = false;\n  log_level = 'warn';\n} else if (status === 429) {\n  user_message = 'Too many requests. Please wait a moment and try again.';\n  clear_pending_action = false;\n  log_level = 'warn';\n} else if (status > 0) {\n  user_message = 'Update failed. Please try again later.';\n  clear_pending_action = false;\n  log_level = 'error';\n}\n\nreturn [\n  {\n    json: {\n      ...$json,\n      elevenlabs_status: status,\n      elevenlabs_response_body: responseBody,\n      elevenlabs_is_success: status >= 200 && status < 300,\n      user_message,\n      clear_pending_action,\n      clear_selected_agent,\n      log_level\n    },\n    pairedItem: 0\n  }\n];"
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "knowledge-get-success",
+      "name": "Knowledge Get Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        1060
+      ],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.elevenlabs_is_success }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              },
+              "rightValue": true
+            }
+          ]
+        }
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "merge-knowledge-base-document",
+      "name": "Merge Knowledge Base Document",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        1040
+      ],
+      "parameters": {
+        "jsCode": "const agentResponse = $node[\"Get ElevenLabs Agent For Knowledge Merge\"].json;\nconst agentConfig = agentResponse.body || agentResponse;\nconst documentResponse = $node[\"Create ElevenLabs Knowledge Text Document\"].json;\nconst document = documentResponse.body || documentResponse;\nconst context = $node['Route After Session Authorization'].json;\n\nconst conversationConfig = agentConfig.conversation_config || {};\nconversationConfig.agent = conversationConfig.agent || {};\nconversationConfig.agent.prompt = conversationConfig.agent.prompt || {};\n\nconst existing = Array.isArray(conversationConfig.agent.prompt.knowledge_base)\n  ? conversationConfig.agent.prompt.knowledge_base\n  : [];\n\nconversationConfig.agent.prompt.knowledge_base = [\n  ...existing,\n  {\n    type: 'text',\n    name: document.name,\n    id: document.id\n  }\n];\n\nreturn [\n  {\n    json: {\n      ...context,\n      conversation_config: conversationConfig,\n      created_knowledge_document_id: document.id,\n      created_knowledge_document_name: document.name\n    },\n    pairedItem: 0\n  }\n];"
+      },
+      "notesInFlow": true,
+      "notes": "Appends created document to conversation_config.agent.prompt.knowledge_base while preserving existing entries."
+    },
+    {
+      "id": "patch-elevenlabs-knowledge-base",
+      "name": "Patch ElevenLabs Knowledge Base",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3960,
+        1040
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ \"https://api.elevenlabs.io/v1/convai/agents/\" + $node[\"Route After Session Authorization\"].json.elevenlabs_agent_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { conversation_config: $json.conversation_config } }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Patches merged knowledge-base list.\nEnable full response/status/headers and Never Error. Configure httpHeaderAuth so it sends xi-api-key.",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "replace-elevenlabs-credential-id",
+          "name": "ElevenLabs API Key"
+        }
+      }
+    },
+    {
+      "id": "map-knowledge-patch-error",
+      "name": "Map Knowledge Patch Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4180,
+        1040
+      ],
+      "parameters": {
+        "jsCode": "const status = Number(\n  $json.statusCode ||\n  $json.status ||\n  $json.response?.statusCode ||\n  $json.error?.statusCode ||\n  0\n);\n\nconst responseBody = $json.body || $json.response?.body || $json.error?.response?.body || $json;\n\nlet user_message = null;\nlet clear_pending_action = false;\nlet clear_selected_agent = false;\nlet log_level = 'info';\n\nif (status >= 200 && status < 300) {\n  user_message = null;\n} else if (status === 404) {\n  user_message = 'That agent is no longer available. Choose another agent.';\n  clear_pending_action = true;\n  clear_selected_agent = true;\n  log_level = 'warn';\n} else if (status === 401 || status === 403) {\n  user_message = 'ElevenLabs authentication failed. Please contact support.';\n  clear_pending_action = true;\n  log_level = 'error';\n} else if (status === 422) {\n  user_message = 'Update failed. Please review the text and try again.';\n  clear_pending_action = false;\n  log_level = 'warn';\n} else if (status === 429) {\n  user_message = 'Too many requests. Please wait a moment and try again.';\n  clear_pending_action = false;\n  log_level = 'warn';\n} else if (status > 0) {\n  user_message = 'Update failed. Please try again later.';\n  clear_pending_action = false;\n  log_level = 'error';\n}\n\nreturn [\n  {\n    json: {\n      ...$json,\n      elevenlabs_status: status,\n      elevenlabs_response_body: responseBody,\n      elevenlabs_is_success: status >= 200 && status < 300,\n      user_message,\n      clear_pending_action,\n      clear_selected_agent,\n      log_level\n    },\n    pairedItem: 0\n  }\n];"
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "knowledge-patch-success",
+      "name": "Knowledge Patch Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        4400,
+        1040
+      ],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.elevenlabs_is_success }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              },
+              "rightValue": true
+            }
+          ]
+        }
+      },
+      "notesInFlow": false
+    },
+    {
+      "id": "clear-pending-action",
+      "name": "Clear Pending Action",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        4620,
+        760
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE user_sessions\nSET pending_action = NULL\nWHERE user_id = $1;",
+        "options": {
+          "queryParameters": "={{ [Number($node[\"Route After Session Authorization\"].json.user.id)] }}"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Clears pending action after successful prompt update.\nUse Query Parameters, not raw expression interpolation. Query Parameters: ={{ [Number($node[\"Route After Session Authorization\"].json.user.id)] }}",
+      "continueOnFail": true,
+      "credentials": {
+        "mySql": {
+          "id": "replace-mysql-credential-id",
+          "name": "MySQL Telegram Agent Manager"
+        }
+      }
+    },
+    {
+      "id": "clear-pending-welcome-action",
+      "name": "Clear Pending Welcome Action",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        4620,
+        900
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE user_sessions\nSET pending_action = NULL\nWHERE user_id = $1;",
+        "options": {
+          "queryParameters": "={{ [Number($node[\"Route After Session Authorization\"].json.user.id)] }}"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Clears pending action after successful welcome update.\nUse Query Parameters, not raw expression interpolation. Query Parameters: ={{ [Number($node[\"Route After Session Authorization\"].json.user.id)] }}",
+      "continueOnFail": true,
+      "credentials": {
+        "mySql": {
+          "id": "replace-mysql-credential-id",
+          "name": "MySQL Telegram Agent Manager"
+        }
+      }
+    },
+    {
+      "id": "clear-pending-knowledge-action",
+      "name": "Clear Pending Knowledge Action",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        4620,
+        1040
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE user_sessions\nSET pending_action = NULL\nWHERE user_id = $1;",
+        "options": {
+          "queryParameters": "={{ [Number($node[\"Route After Session Authorization\"].json.user.id)] }}"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Clears pending action after successful knowledge-base update.\nUse Query Parameters, not raw expression interpolation. Query Parameters: ={{ [Number($node[\"Route After Session Authorization\"].json.user.id)] }}",
+      "continueOnFail": true,
+      "credentials": {
+        "mySql": {
+          "id": "replace-mysql-credential-id",
+          "name": "MySQL Telegram Agent Manager"
+        }
+      }
+    },
+    {
+      "id": "send-prompt-success",
+      "name": "Send Prompt Success",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        4840,
+        760
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ \"Prompt updated for \" + $node[\"Authorize Session Agent\"].json.agent_name + \".\" }}",
+        "additionalFields": {
+          "replyMarkup": "{\"inline_keyboard\":[[{\"text\":\"Select Agent\",\"callback_data\":\"menu:select_agent\"}],[{\"text\":\"Update Prompt\",\"callback_data\":\"action:update_prompt\"}],[{\"text\":\"Update Welcome Message\",\"callback_data\":\"action:update_welcome_message\"}],[{\"text\":\"Update Knowledge Base\",\"callback_data\":\"action:update_knowledge_text\"}],[{\"text\":\"Cancel\",\"callback_data\":\"action:cancel\"}]]}"
+        }
+      },
+      "notesInFlow": false,
+      "credentials": {
+        "telegramApi": {
+          "id": "replace-telegram-credential-id",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "send-welcome-success",
+      "name": "Send Welcome Success",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        4840,
+        900
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ \"Welcome message updated for \" + $node[\"Authorize Session Agent\"].json.agent_name + \".\" }}",
+        "additionalFields": {
+          "replyMarkup": "{\"inline_keyboard\":[[{\"text\":\"Select Agent\",\"callback_data\":\"menu:select_agent\"}],[{\"text\":\"Update Prompt\",\"callback_data\":\"action:update_prompt\"}],[{\"text\":\"Update Welcome Message\",\"callback_data\":\"action:update_welcome_message\"}],[{\"text\":\"Update Knowledge Base\",\"callback_data\":\"action:update_knowledge_text\"}],[{\"text\":\"Cancel\",\"callback_data\":\"action:cancel\"}]]}"
+        }
+      },
+      "notesInFlow": false,
+      "credentials": {
+        "telegramApi": {
+          "id": "replace-telegram-credential-id",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "send-knowledge-success",
+      "name": "Send Knowledge Success",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        4840,
+        1040
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ \"Knowledge base updated for \" + $node[\"Authorize Session Agent\"].json.agent_name + \".\" }}",
+        "additionalFields": {
+          "replyMarkup": "{\"inline_keyboard\":[[{\"text\":\"Select Agent\",\"callback_data\":\"menu:select_agent\"}],[{\"text\":\"Update Prompt\",\"callback_data\":\"action:update_prompt\"}],[{\"text\":\"Update Welcome Message\",\"callback_data\":\"action:update_welcome_message\"}],[{\"text\":\"Update Knowledge Base\",\"callback_data\":\"action:update_knowledge_text\"}],[{\"text\":\"Cancel\",\"callback_data\":\"action:cancel\"}]]}"
+        }
+      },
+      "notesInFlow": false,
+      "credentials": {
+        "telegramApi": {
+          "id": "replace-telegram-credential-id",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "cleanup-mapped-elevenlabs-session",
+      "name": "Cleanup Mapped ElevenLabs Session",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        4620,
+        1180
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE user_sessions\nSET selected_voice_agent_id = CASE WHEN $1 THEN NULL ELSE selected_voice_agent_id END,\n    pending_action = CASE WHEN $2 THEN NULL ELSE pending_action END\nWHERE user_id = $3;",
+        "options": {
+          "queryParameters": "={{ [Boolean($json.clear_selected_agent), Boolean($json.clear_pending_action), Number($node[\"Route After Session Authorization\"].json.user.id)] }}"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Applies mapped cleanup for 404 and auth failures. 429 and 422 keep pending_action.\nUse Query Parameters, not raw expression interpolation. Query Parameters: ={{ [Boolean($json.clear_selected_agent), Boolean($json.clear_pending_action), Number($node[\"Route After Session Authorization\"].json.user.id)] }}",
+      "continueOnFail": true,
+      "credentials": {
+        "mySql": {
+          "id": "replace-mysql-credential-id",
+          "name": "MySQL Telegram Agent Manager"
+        }
+      }
+    },
+    {
+      "id": "send-elevenlabs-error",
+      "name": "Send ElevenLabs Error",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        4840,
+        1180
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.user_message || \"Update failed. Please try again later.\" }}",
+        "additionalFields": {}
+      },
+      "notesInFlow": false,
+      "credentials": {
+        "telegramApi": {
+          "id": "replace-telegram-credential-id",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "insert-knowledge-orphan-document",
+      "name": "Insert Knowledge Orphan Document",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        4620,
+        1320
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO kb_orphan_documents (\n  user_id,\n  voice_agent_id,\n  elevenlabs_agent_id,\n  elevenlabs_document_id,\n  document_name,\n  failure_status_code,\n  failure_response_json\n)\nVALUES ($1, $2, $3, $4, $5, $6, CAST($7 AS JSON));",
+        "options": {
+          "queryParameters": "={{ [\n  Number($node[\"Route After Session Authorization\"].json.user.id),\n  Number($node[\"Route After Session Authorization\"].json.session.selected_voice_agent_id),\n  $node[\"Route After Session Authorization\"].json.elevenlabs_agent_id,\n  $node[\"Create ElevenLabs Knowledge Text Document\"].json.body?.id || $node[\"Create ElevenLabs Knowledge Text Document\"].json.id,\n  $node[\"Create ElevenLabs Knowledge Text Document\"].json.body?.name || $node[\"Create ElevenLabs Knowledge Text Document\"].json.name,\n  Number($json.elevenlabs_status),\n  JSON.stringify($json.elevenlabs_response_body || {})\n] }}"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Records created knowledge-base document if later attachment PATCH fails.\nUse Query Parameters, not raw expression interpolation. Query Parameters: ={{ [\n  Number($node[\"Route After Session Authorization\"].json.user.id),\n  Number($node[\"Route After Session Authorization\"].json.session.selected_voice_agent_id),\n  $node[\"Route After Session Authorization\"].json.elevenlabs_agent_id,\n  $node[\"Create ElevenLabs Knowledge Text Document\"].json.body?.id || $node[\"Create ElevenLabs Knowledge Text Document\"].json.id,\n  $node[\"Create ElevenLabs Knowledge Text Document\"].json.body?.name || $node[\"Create ElevenLabs Knowledge Text Document\"].json.name,\n  Number($json.elevenlabs_status),\n  JSON.stringify($json.elevenlabs_response_body || {})\n] }}",
+      "continueOnFail": true,
+      "credentials": {
+        "mySql": {
+          "id": "replace-mysql-credential-id",
+          "name": "MySQL Telegram Agent Manager"
+        }
+      }
+    },
+    {
+      "id": "send-knowledge-orphan-error",
+      "name": "Send Knowledge Orphan Error",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        4840,
+        1320
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "Knowledge document created but could not be attached. Please try the update again or contact support.",
+        "additionalFields": {}
+      },
+      "notesInFlow": false,
+      "credentials": {
+        "telegramApi": {
+          "id": "replace-telegram-credential-id",
+          "name": "Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize Telegram Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Telegram Update": {
+      "main": [
+        [
+          {
+            "node": "Has Valid Telegram Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Valid Telegram Context": {
+      "main": [
+        [
+          {
+            "node": "Load Active Telegram User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Active Telegram User": {
+      "main": [
+        [
+          {
+            "node": "Has Active User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Active User": {
+      "main": [
+        [
+          {
+            "node": "Ensure User Session",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send No Agents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ensure User Session": {
+      "main": [
+        [
+          {
+            "node": "Load User Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load User Session": {
+      "main": [
+        [
+          {
+            "node": "Load User Agents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load User Agents": {
+      "main": [
+        [
+          {
+            "node": "Build Workflow Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Workflow Context": {
+      "main": [
+        [
+          {
+            "node": "Database Error Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Database Error Guard": {
+      "main": [
+        [
+          {
+            "node": "Database Status Branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Database Status Branch": {
+      "main": [
+        [
+          {
+            "node": "Has User Agents",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Temporary Database Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has User Agents": {
+      "main": [
+        [
+          {
+            "node": "Answer Callback Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send No Agents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Answer Callback Query": {
+      "main": [
+        [
+          {
+            "node": "Route Telegram Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Telegram Update": {
+      "main": [
+        [
+          {
+            "node": "Route Branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Branch": {
+      "main": [
+        [
+          {
+            "node": "Send Main Menu",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cancel Flow",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Agent Selection Keyboard",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse Selected Agent Callback",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse Action Callback",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Unsupported Payload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Validate Pending Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cancel Flow": {
+      "main": [
+        [
+          {
+            "node": "Send Canceled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Agent Selection Keyboard": {
+      "main": [
+        [
+          {
+            "node": "Send Agent List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Selected Agent Callback": {
+      "main": [
+        [
+          {
+            "node": "Authorize Selected Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authorize Selected Agent": {
+      "main": [
+        [
+          {
+            "node": "Has Authorized Selected Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Authorized Selected Agent": {
+      "main": [
+        [
+          {
+            "node": "Save Selected Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Unauthorized Agent Selection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Selected Agent": {
+      "main": [
+        [
+          {
+            "node": "Send Selected Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Unauthorized Agent Selection": {
+      "main": [
+        [
+          {
+            "node": "Send Unauthorized Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Action Callback": {
+      "main": [
+        [
+          {
+            "node": "Has Selected Agent For Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Selected Agent For Action": {
+      "main": [
+        [
+          {
+            "node": "Authorize Session Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Choose Agent First",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Choose Agent First": {
+      "main": [
+        [
+          {
+            "node": "Build Agent Selection Keyboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authorize Session Agent": {
+      "main": [
+        [
+          {
+            "node": "Has Authorized Session Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Authorized Session Agent": {
+      "main": [
+        [
+          {
+            "node": "Route After Session Authorization",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Clear Invalid Selected Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route After Session Authorization": {
+      "main": [
+        [
+          {
+            "node": "Authorized Session Branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authorized Session Branch": {
+      "main": [
+        [
+          {
+            "node": "Store Pending Action",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Route Pending Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Pending Action": {
+      "main": [
+        [
+          {
+            "node": "Send Action Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clear Invalid Selected Agent": {
+      "main": [
+        [
+          {
+            "node": "Send Invalid Selected Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Pending Text": {
+      "main": [
+        [
+          {
+            "node": "Is Valid Update Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Valid Update Text": {
+      "main": [
+        [
+          {
+            "node": "Authorize Session Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Pending Action": {
+      "main": [
+        [
+          {
+            "node": "Get ElevenLabs Agent For Prompt Merge",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get ElevenLabs Agent For Welcome Merge",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create ElevenLabs Knowledge Text Document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get ElevenLabs Agent For Prompt Merge": {
+      "main": [
+        [
+          {
+            "node": "Map ElevenLabs Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map ElevenLabs Error": {
+      "main": [
+        [
+          {
+            "node": "Prompt Get Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prompt Get Success": {
+      "main": [
+        [
+          {
+            "node": "Merge Prompt Update",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cleanup Mapped ElevenLabs Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Prompt Update": {
+      "main": [
+        [
+          {
+            "node": "Patch ElevenLabs Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Patch ElevenLabs Prompt": {
+      "main": [
+        [
+          {
+            "node": "Map Prompt Patch Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Prompt Patch Error": {
+      "main": [
+        [
+          {
+            "node": "Prompt Patch Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prompt Patch Success": {
+      "main": [
+        [
+          {
+            "node": "Clear Pending Action",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cleanup Mapped ElevenLabs Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get ElevenLabs Agent For Welcome Merge": {
+      "main": [
+        [
+          {
+            "node": "Map Welcome Get Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Welcome Get Error": {
+      "main": [
+        [
+          {
+            "node": "Welcome Get Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Welcome Get Success": {
+      "main": [
+        [
+          {
+            "node": "Merge Welcome Message Update",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cleanup Mapped ElevenLabs Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Welcome Message Update": {
+      "main": [
+        [
+          {
+            "node": "Patch ElevenLabs Welcome Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Patch ElevenLabs Welcome Message": {
+      "main": [
+        [
+          {
+            "node": "Map Welcome Patch Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Welcome Patch Error": {
+      "main": [
+        [
+          {
+            "node": "Welcome Patch Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Welcome Patch Success": {
+      "main": [
+        [
+          {
+            "node": "Clear Pending Welcome Action",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cleanup Mapped ElevenLabs Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create ElevenLabs Knowledge Text Document": {
+      "main": [
+        [
+          {
+            "node": "Map Knowledge Create Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Knowledge Create Error": {
+      "main": [
+        [
+          {
+            "node": "Knowledge Create Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Knowledge Create Success": {
+      "main": [
+        [
+          {
+            "node": "Get ElevenLabs Agent For Knowledge Merge",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cleanup Mapped ElevenLabs Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get ElevenLabs Agent For Knowledge Merge": {
+      "main": [
+        [
+          {
+            "node": "Map Knowledge Get Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Knowledge Get Error": {
+      "main": [
+        [
+          {
+            "node": "Knowledge Get Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Knowledge Get Success": {
+      "main": [
+        [
+          {
+            "node": "Merge Knowledge Base Document",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insert Knowledge Orphan Document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Knowledge Base Document": {
+      "main": [
+        [
+          {
+            "node": "Patch ElevenLabs Knowledge Base",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Patch ElevenLabs Knowledge Base": {
+      "main": [
+        [
+          {
+            "node": "Map Knowledge Patch Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Knowledge Patch Error": {
+      "main": [
+        [
+          {
+            "node": "Knowledge Patch Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Knowledge Patch Success": {
+      "main": [
+        [
+          {
+            "node": "Clear Pending Knowledge Action",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insert Knowledge Orphan Document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clear Pending Action": {
+      "main": [
+        [
+          {
+            "node": "Send Prompt Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clear Pending Welcome Action": {
+      "main": [
+        [
+          {
+            "node": "Send Welcome Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clear Pending Knowledge Action": {
+      "main": [
+        [
+          {
+            "node": "Send Knowledge Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cleanup Mapped ElevenLabs Session": {
+      "main": [
+        [
+          {
+            "node": "Send ElevenLabs Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Knowledge Orphan Document": {
+      "main": [
+        [
+          {
+            "node": "Send Knowledge Orphan Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Moscow",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "pinData": {},
+  "versionId": "telegram-elevenlabs-agent-manager-001",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

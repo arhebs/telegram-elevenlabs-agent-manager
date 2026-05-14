@@ -1,0 +1,94 @@
+{
+  "id": "telegram-agent-manager-error-handler",
+  "name": "Telegram Agent Manager Error Handler",
+  "nodes": [
+    {
+      "id": "error-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -420,
+        -40
+      ],
+      "parameters": {},
+      "notesInFlow": true,
+      "notes": "Workflow-level unexpected error handler."
+    },
+    {
+      "id": "build-error-handler-message",
+      "name": "Build Error Handler Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -180,
+        -40
+      ],
+      "parameters": {
+        "jsCode": "const execution = $json.execution || {};\nconst workflow = $json.workflow || {};\nreturn [{\n  json: {\n    text: 'Temporary database error. Please try again later.',\n    internal_error_summary: {\n      workflow: workflow.name,\n      execution_id: execution.id,\n      last_node: execution.lastNodeExecuted,\n      timestamp: new Date().toISOString()\n    }\n  }\n}];"
+      },
+      "notesInFlow": true,
+      "notes": "Keeps user-facing database fallback text available and preserves internal execution details for logs."
+    },
+    {
+      "id": "send-temporary-database-error",
+      "name": "Send Temporary Database Error",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        80,
+        -40
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "Temporary database error. Please try again later.",
+        "additionalFields": {}
+      },
+      "notesInFlow": false,
+      "credentials": {
+        "telegramApi": {
+          "id": "replace-telegram-credential-id",
+          "name": "Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Error Handler Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Error Handler Message": {
+      "main": [
+        [
+          {
+            "node": "Send Temporary Database Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Moscow"
+  },
+  "staticData": null,
+  "pinData": {},
+  "versionId": "telegram-agent-manager-error-handler-001",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
