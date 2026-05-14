@@ -23,3 +23,21 @@ This repository contains an n8n workflow, MySQL schema, seed data, and reviewer 
 7. Configure Telegram, MySQL, and ElevenLabs credentials in n8n.
 8. Activate the Telegram Trigger polling workflow.
 9. Test `/start` from each seeded Telegram user.
+
+## Supported Telegram Inputs
+
+The bot supports both the inline menu flow and simple free-form update commands.
+
+Menu flow:
+
+1. Select an agent.
+2. Choose `Update Prompt`, `Update Welcome Message`, or `Update Knowledge Base`.
+3. Send the new text when the bot asks for it.
+
+Free-form prompt example:
+
+```text
+update my agent to answer Hello world
+```
+
+If the user has one linked agent, the command is applied to that agent. If the user has multiple linked agents and no selected agent, the bot asks the user to choose an agent first. The same MySQL ownership check still runs before any ElevenLabs API call.

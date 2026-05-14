@@ -34,6 +34,15 @@ This submission uses Telegram Trigger polling. The included workflow therefore d
 9. Activate the workflow.
 10. Test `/start` from each seeded Telegram user.
 
+## Supported Input Modes
+
+The workflow supports two Telegram input modes:
+
+- Inline keyboard menu flow.
+- Simple free-form update commands, for example: `update my agent to answer Hello world`.
+
+Free-form commands are parsed before the fallback menu route. If the user has one linked agent, the workflow can use it automatically. If the user has multiple linked agents and no selected session agent, the workflow sends the agent selection keyboard. In both cases, the selected internal `voice_agents.id` is re-authorized against the current Telegram user before any ElevenLabs API node runs.
+
 ## Credentials To Configure In n8n
 
 - `Telegram Bot` credential for the `Telegram Trigger` and Telegram send-message nodes.
