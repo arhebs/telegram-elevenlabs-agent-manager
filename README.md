@@ -42,4 +42,4 @@ update my agent to answer Hello world
 
 If the user has one linked agent, the command is applied to that agent. If the user has multiple linked agents and no selected agent, the bot asks the user to choose an agent first. The same MySQL ownership check still runs before any ElevenLabs API call.
 
-Natural-language messages are classified with OpenAI `gpt-5.4-nano` through the Responses API using a strict JSON schema. Configure `OPENAI_API_KEY` in the n8n environment before activating the workflow.
+Natural-language messages are classified through OpenRouter using `openai/gpt-5.4-nano` and a strict JSON schema. Configure `OPENROUTER_API_KEY` in the n8n environment before activating the workflow.

@@ -6,10 +6,10 @@
 - `PATCH https://api.elevenlabs.io/v1/convai/agents/{agent_id}`
 - `POST https://api.elevenlabs.io/v1/convai/knowledge-base/text`
 
-## OpenAI Intent Classification
+## OpenRouter Intent Classification
 
-- `POST https://api.openai.com/v1/responses`
-- Model: `gpt-5.4-nano`
+- `POST https://openrouter.ai/api/v1/chat/completions`
+- Model: `openai/gpt-5.4-nano`
 - Purpose: classify natural-language Telegram messages into one of `update_prompt`, `update_welcome_message`, `update_knowledge_text`, or `none`.
 - Output mode: Structured Outputs with a strict JSON schema.
 

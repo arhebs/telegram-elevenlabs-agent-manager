@@ -4,7 +4,7 @@
 
 - Telegram bot token
 - ElevenLabs API key
-- OpenAI API key for natural-language intent classification
+- OpenRouter API key for natural-language intent classification
 - MySQL host, port, database, user, password
 - Telegram webhook secret token, only if you replace the Telegram Trigger with Webhook mode
 
@@ -42,14 +42,14 @@ The workflow supports two Telegram input modes:
 - Inline keyboard menu flow.
 - AI-parsed natural-language update commands, for example: `update my agent to answer Hello world`.
 
-Natural-language commands are classified with OpenAI `gpt-5.4-nano` via the Responses API and a strict JSON schema. If the user has one linked agent, the workflow can use it automatically. If the user has multiple linked agents and no selected session agent, the workflow sends the agent selection keyboard. In both cases, the selected internal `voice_agents.id` is re-authorized against the current Telegram user before any ElevenLabs API node runs.
+Natural-language commands are classified through OpenRouter using `openai/gpt-5.4-nano` and a strict JSON schema. If the user has one linked agent, the workflow can use it automatically. If the user has multiple linked agents and no selected session agent, the workflow sends the agent selection keyboard. In both cases, the selected internal `voice_agents.id` is re-authorized against the current Telegram user before any ElevenLabs API node runs.
 
 ## Credentials To Configure In n8n
 
 - `Telegram Bot` credential for the `Telegram Trigger` and Telegram send-message nodes.
 - `MySQL Telegram Agent Manager` credential for all MySQL nodes.
 - `ElevenLabs API Key` credential or environment variable mapping for HTTP Request nodes that send the `xi-api-key` header.
-- `OPENAI_API_KEY` environment variable for the AI intent-classification HTTP Request node.
+- `OPENROUTER_API_KEY` environment variable for the AI intent-classification HTTP Request node.
 - `TELEGRAM_BOT_TOKEN` environment variable only if using the HTTP Request fallback node for `answerCallbackQuery`.
 
 ## Database Validation
